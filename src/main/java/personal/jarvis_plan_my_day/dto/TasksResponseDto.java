@@ -2,14 +2,12 @@ package personal.jarvis_plan_my_day.dto;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
-import java.time.OffsetDateTime;
+import java.util.List;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record TaskListDto(
+public record TasksResponseDto(
         String kind,
-        String id,
         String etag,
-        String title,
-        OffsetDateTime updated,
-        String selfLink
+        String nextPageToken,
+        List<TaskDto> items
 ) {}

@@ -1,108 +1,127 @@
 package personal.jarvis_plan_my_day.service;
 
-import org.springframework.web.client.HttpClientErrorException;
-import personal.jarvis_plan_my_day.dto.CalendarEventDto;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
+import personal.jarvis_plan_my_day.dto.CalendarEventDto;
+import personal.jarvis_plan_my_day.dto.CalendarEventsResponseDto;
 
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
+//TODO: add an endpoint with starting and ending dates
 @Service
 public class GoogleCalendarService {
+
+  private static final Logger log = LoggerFactory.getLogger(GoogleCalendarService.class);
+
+  private static final String PRIMARY_CALENDAR = "primary";
+  private static final int PAGE_SIZE = 250;          // максимум для Calendar API
+  private static final int MAX_PAGES = 50;           // safety cap: 12500 событий
+  private static final int MAX_DAYS = 365 * 3;       // ограничение глубины запроса
 
   private final RestClient restClient;
 
   public GoogleCalendarService() {
-    this.restClient =
-        RestClient.builder().baseUrl("https://www.googleapis.com/calendar/v3").build();
+    this.restClient = RestClient.builder()
+            .baseUrl("https://www.googleapis.com/calendar/v3")
+            .build();
   }
 
+  // -------- Public API --------
+
   public List<CalendarEventDto> getTodayEvents(OAuth2AuthorizedClient authorizedClient) {
-    String accessToken = authorizedClient.getAccessToken().getTokenValue();
-
     ZoneId zoneId = ZoneId.systemDefault();
-    ZonedDateTime startOfDay = ZonedDateTime.now(zoneId).toLocalDate().atStartOfDay(zoneId);
+    ZonedDateTime startOfDay = ZonedDateTime.now(zoneId)
+            .toLocalDate()
+            .atStartOfDay(zoneId);
     ZonedDateTime endOfDay = startOfDay.plusDays(1);
+    return getEventsBetween(authorizedClient, startOfDay, endOfDay);
+  }
 
-    // Переводим в UTC, чтобы получить строки с 'Z' вместо '+02:00'
-    String timeMin = startOfDay.toInstant().toString();
-    String timeMax = endOfDay.toInstant().toString();
+  public List<CalendarEventDto> getEventsForLastDays(
+          OAuth2AuthorizedClient authorizedClient,
+          int days
+  ) {
+    days = normalizeDays(days);
+    ZoneId zoneId = ZoneId.systemDefault();
+    ZonedDateTime now = ZonedDateTime.now(zoneId);
+    ZonedDateTime startDateTime = now.minusDays(days);
+    return getEventsBetween(authorizedClient, startDateTime, now);
+  }
 
-    try {
-      Map<String, Object> response =
-          restClient
-              .get()
-              .uri(
-                  uriBuilder ->
-                      uriBuilder
-                          .path("/calendars/{calendarId}/events")
+  // -------- Internal --------
+
+  private List<CalendarEventDto> getEventsBetween(
+          OAuth2AuthorizedClient authorizedClient,
+          ZonedDateTime from,
+          ZonedDateTime to
+  ) {
+    String accessToken = authorizedClient.getAccessToken().getTokenValue();
+    String timeMin = from.toInstant().toString();
+    String timeMax = to.toInstant().toString();
+
+    List<CalendarEventDto> allEvents = new ArrayList<>();
+    String pageToken = null;
+    int pageCount = 0;
+
+    do {
+      final String currentToken = pageToken;
+      try {
+        CalendarEventsResponseDto response = restClient.get()
+                .uri(uriBuilder -> {
+                  uriBuilder.path("/calendars/{calendarId}/events")
                           .queryParam("timeMin", timeMin)
                           .queryParam("timeMax", timeMax)
                           .queryParam("singleEvents", "true")
                           .queryParam("orderBy", "startTime")
-                          .build("primary"))
-              .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
-              .retrieve()
-              .body(Map.class);
+                          .queryParam("maxResults", PAGE_SIZE);
+                  if (currentToken != null) {
+                    uriBuilder.queryParam("pageToken", currentToken);
+                  }
+                  return uriBuilder.build(PRIMARY_CALENDAR);
+                })
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .retrieve()
+                .body(CalendarEventsResponseDto.class);
 
-      return mapEvents(response);
+        if (response == null) {
+          break;
+        }
+        if (response.items() != null) {
+          allEvents.addAll(response.items());
+        }
+        pageToken = response.nextPageToken();
+        pageCount++;
 
-    } catch (HttpClientErrorException e) {
-      System.out.println("Google Calendar API error: " + e.getStatusCode());
-      System.out.println("Response body: " + e.getResponseBodyAsString());
-      throw e;
-    }
+        if (pageCount >= MAX_PAGES) {
+          log.warn("Reached page limit ({}) while fetching calendar events; " +
+                          "got {} events, results may be incomplete",
+                  MAX_PAGES, allEvents.size());
+          break;
+        }
+
+      } catch (HttpClientErrorException e) {
+        log.error("Google Calendar API error: status={}, body={}",
+                e.getStatusCode(), e.getResponseBodyAsString());
+        throw e;
+      }
+    } while (pageToken != null);
+
+    log.info("Fetched {} events from {} to {} ({} pages)",
+            allEvents.size(), timeMin, timeMax, pageCount);
+    return allEvents;
   }
 
-  private List<CalendarEventDto> mapEvents(Map<String, Object> response) {
-    List<CalendarEventDto> events = new ArrayList<>();
-
-    if (response == null) {
-      return events;
-    }
-
-    List<Map<String, Object>> items = (List<Map<String, Object>>) response.get("items");
-    if (items == null) {
-      return events;
-    }
-
-    for (Map<String, Object> item : items) {
-      String id = (String) item.get("id");
-      String summary = (String) item.getOrDefault("summary", "(без названия)");
-
-      Map<String, Object> startMap = (Map<String, Object>) item.get("start");
-      Map<String, Object> endMap = (Map<String, Object>) item.get("end");
-
-      String start = extractDateOrDateTime(startMap);
-      String end = extractDateOrDateTime(endMap);
-
-      events.add(new CalendarEventDto(id, summary, start, end));
-    }
-
-    return events;
-  }
-
-  private String extractDateOrDateTime(Map<String, Object> value) {
-    if (value == null) {
-      return null;
-    }
-
-    Object dateTime = value.get("dateTime");
-    if (dateTime != null) {
-      return dateTime.toString();
-    }
-
-    Object date = value.get("date");
-    if (date != null) {
-      return date.toString();
-    }
-
-    return null;
+  private int normalizeDays(int days) {
+    if (days < 1) return 1;
+    if (days > MAX_DAYS) return MAX_DAYS;
+    return days;
   }
 }

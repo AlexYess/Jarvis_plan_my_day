@@ -26,8 +26,18 @@ public class CalendarController {
   public String home() {
     return """
             <h2>Jarvis Plan My Day</h2>
-            <a href="/calendar/today">Получить события на сегодня</a>
-            <a href="/tasks">Получить задачи</a>
+
+            <p>
+                <a href="/calendar/today">Получить события на сегодня</a>
+            </p>
+
+            <p>
+                <a href="/tasks">Получить задачи</a>
+            </p>
+
+            <p>
+                <a href="/api/patterns/analyze?days=10">Запустить анализ паттернов</a>
+            </p>
             """;
   }
 
