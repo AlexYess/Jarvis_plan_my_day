@@ -6,7 +6,9 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import personal.jarvis_plan_my_day.dto.CalendarEventDto;
+import personal.jarvis_plan_my_day.dto.TaskDto;
 import personal.jarvis_plan_my_day.service.GoogleCalendarService;
+import personal.jarvis_plan_my_day.service.GoogleTaskService;
 import personal.jarvis_plan_my_day.service.PatternAnalyzerService;
 
 import java.util.List;
@@ -16,14 +18,17 @@ import java.util.Map;
 public class PatternAnalysisController {
 
     private final GoogleCalendarService googleCalendarService;
+    private final GoogleTaskService googleTaskService;
     private final PatternAnalyzerService patternAnalyzerService;
 
     public PatternAnalysisController(
             GoogleCalendarService googleCalendarService,
-            PatternAnalyzerService PatternAnalyzerService
+            GoogleTaskService googleTaskService,
+            PatternAnalyzerService patternAnalyzerService
     ) {
         this.googleCalendarService = googleCalendarService;
-        this.patternAnalyzerService = PatternAnalyzerService;
+        this.googleTaskService = googleTaskService;
+        this.patternAnalyzerService = patternAnalyzerService;
     }
 
     @GetMapping("/api/patterns/analyze")
@@ -35,7 +40,16 @@ public class PatternAnalysisController {
                 googleCalendarService.getEventsForLastDays(authorizedClient, days);
 
         Long userId = 1L;
-
         return patternAnalyzerService.analyzeEvents(userId, events);
+    }
+
+    @GetMapping("/api/tasks/classify")
+    public Map<String, Object> classifyTasks(
+            @RegisteredOAuth2AuthorizedClient("google") OAuth2AuthorizedClient authorizedClient
+    ) {
+        List<TaskDto> tasks = googleTaskService.getTasks(authorizedClient);
+
+        Long userId = 1L;
+        return patternAnalyzerService.classifyTasks(userId, tasks);
     }
 }

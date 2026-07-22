@@ -38,6 +38,10 @@ public class CalendarController {
             <p>
                 <a href="/api/patterns/analyze?days=10">Запустить анализ паттернов</a>
             </p>
+            
+            <p>
+                <a href="/api/tasks/classify">классифицировать</a>
+            </p>
             """;
   }
 

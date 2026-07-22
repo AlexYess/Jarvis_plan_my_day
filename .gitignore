@@ -35,3 +35,8 @@ out/
 
 ### VS Code ###
 .vscode/
+
+**src/main/resources/credentials.json
+**python_service/Jarvis_test/.env
+**/.env
+**/credentials.json
